@@ -421,11 +421,31 @@ def login_gate():
 
 
 # ----------------------------------------------------------------------
+# TOKEN (acesso via Portal) — quando exposto na internet pelo tunel.
+# O Portal injeta ?token=... no iframe; sem o token certo, o painel nao abre.
+# O segredo fica so na config deste PC (DASH_TOKEN) e nos Secrets do Portal —
+# nunca no repositorio nem no banco do Portal.
+# ----------------------------------------------------------------------
+def token_gate():
+    esperado = _cfg("DASH_TOKEN", "")
+    if not esperado:
+        return  # sem token configurado (ex.: uso local): nao exige
+    try:
+        recebido = st.query_params.get("token", "")
+    except Exception:  # noqa: BLE001  (Streamlit antigo)
+        recebido = st.experimental_get_query_params().get("token", [""])[0]
+    if recebido != esperado:
+        st.error("🔒 Acesso negado. Abra este painel pelo Portal.")
+        st.stop()
+
+
+# ----------------------------------------------------------------------
 # APP
 # ----------------------------------------------------------------------
 st.set_page_config(page_title="Contratos de Venda - Grupo FRT",
                    page_icon="🌾", layout="wide",
                    initial_sidebar_state="expanded")
+token_gate()
 login_gate()
 st.markdown(
     f"""<style>
