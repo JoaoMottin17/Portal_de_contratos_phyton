@@ -424,7 +424,8 @@ def login_gate():
 # APP
 # ----------------------------------------------------------------------
 st.set_page_config(page_title="Contratos de Venda - Grupo FRT",
-                   page_icon="🌾", layout="wide")
+                   page_icon="🌾", layout="wide",
+                   initial_sidebar_state="expanded")
 login_gate()
 st.markdown(
     f"""<style>
@@ -451,7 +452,9 @@ st.markdown(
 
 # ---- Atualizacao automatica ----
 st.sidebar.header("Atualização")
-auto = st.sidebar.checkbox("Atualizar automaticamente", value=True)
+# Padrao DESLIGADO: o snapshot na nuvem so muda de hora em hora, e o auto-refresh
+# "congela" a tela (filtros inacessiveis) a cada recarga. Ligue se quiser.
+auto = st.sidebar.checkbox("Atualizar automaticamente", value=False)
 intervalo = st.sidebar.select_slider("Intervalo", options=[1, 5, 10, 15, 30],
                                      value=5, format_func=lambda m: f"{m} min")
 tick = 0
