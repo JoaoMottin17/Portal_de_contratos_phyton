@@ -514,7 +514,10 @@ sel_uf = st.sidebar.multiselect(
 produtores = sorted(p for p in itens["PRODUTOR"].unique() if p)
 sel_prod = st.sidebar.multiselect("Produtor", options=produtores, default=[])
 safras = sorted(s for s in itens["SAFRA"].unique() if s)
-sel_safra = st.sidebar.multiselect("Safra", options=safras, default=safras)
+# Padrao: abre so com a safra mais recente marcada (nao todas), para o painel
+# vir focado na safra atual ao atualizar. O usuario pode marcar as demais.
+sel_safra = st.sidebar.multiselect("Safra", options=safras,
+                                   default=[safras[-1]] if safras else [])
 clientes = sorted(c for c in itens["CLIENTE"].unique() if c)
 sel_cliente = st.sidebar.multiselect("Cliente", options=clientes, default=[])
 produtos_lista = sorted(p for p in itens["PRODUTO"].unique() if p)
