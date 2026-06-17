@@ -1,0 +1,14 @@
+# Tema claro com a identidade visual do Grupo Fernando Ribas Taques
+[theme]
+base = "light"
+primaryColor = "#2E7D32"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#EAF3E7"
+textColor = "#14401E"
+font = "sans serif"
+
+[server]
+runOnSave = true
+
+[browser]
+gatherUsageStats = false

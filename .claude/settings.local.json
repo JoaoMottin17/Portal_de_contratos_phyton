@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(grep -vi \"use_container_width\\\\|replace\\\\|width\\\\|removed\\\\|^$\\\\|stretch\\\\|content\")",
+      "Bash(python -m streamlit run dashboard_contratos.py --server.headless false --server.port 8501)",
+      "Bash(grep -qi \"localhost:8501\\\\|Local URL\\\\|Network URL\" \"C:/Users/PICHAU/AppData/Local/Temp/claude/c--Users-PICHAU-OneDrive-Pessoal-Pessoal-1--rea-de-Trabalho-Visual-code-BD/facba5cd-dfee-4e01-9679-29be97794aa8/tasks/bqil0w5uj.output\")",
+      "Bash(break)",
+      "Bash(python _q_produtores.py)",
+      "Bash(python -m pip install streamlit-autorefresh PyMuPDF --quiet)",
+      "Bash(python -c \"import streamlit_autorefresh, fitz; print\\('autorefresh OK; PyMuPDF', fitz.__doc__ and 'OK'\\)\")",
+      "Bash(python -m py_compile dashboard_contratos.py)",
+      "Bash(python _q_moeda.py)",
+      "Bash(python _q_unid.py)",
+      "Bash(rm -f _q_moeda.py _q_unid.py)",
+      "Bash(python -c \"import numpy; print\\('numpy', numpy.__version__, 'OK'\\)\")",
+      "Read(//c/Users/PICHAU/**)",
+      "Read(//c/Users/PICHAU/Downloads/**)",
+      "Bash(python -c \"import PIL; print\\('Pillow', PIL.__version__\\)\")",
+      "Bash(python gerar_logo.py)",
+      "Bash(grep -qi \"localhost:8501\" \"C:/Users/PICHAU/AppData/Local/Temp/claude/c--Users-PICHAU-OneDrive-Pessoal-Pessoal-1--rea-de-Trabalho-Visual-code-BD/facba5cd-dfee-4e01-9679-29be97794aa8/tasks/bc210dclp.output\")",
+      "Bash(ls -1 *.py *.png *.toml)",
+      "Bash(python _q_milheto.py)",
+      "Bash(python _q_milheto2.py)",
+      "Bash(python _q_safra.py)",
+      "PowerShell(python -m streamlit run dashboard_contratos.py --server.headless true --server.port 8501)",
+      "PowerShell($cmds = @\\('py','python3','python'\\); foreach\\($c in $cmds\\){ $g = Get-Command $c -ErrorAction SilentlyContinue; if\\($g\\){ \"FOUND: $c -> $\\($g.Source\\)\" } }; \"---\"; & py --version 2>&1; \"---py-streamlit---\"; & py -m streamlit --version 2>&1)",
+      "PowerShell(py -m pip install -r requirements.txt)",
+      "PowerShell(py -m streamlit run dashboard_contratos.py --server.headless true --server.port 8501)",
+      "PowerShell(Start-Process \"http://localhost:8501\")"
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+# Segredos — NUNCA commitar
+.streamlit/secrets.toml
+
+# Snapshots e bancos locais
+snap_*.parquet
+snap.db
+*.sqlite
+
+# Mapa do banco (arquivos enormes; gerados por extrair_schema.py)
+mapa_banco.json
+mapa_banco.md
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Scripts temporarios de diagnostico
+_diag_*.py
+_verify_*.py
+_q_*.py
