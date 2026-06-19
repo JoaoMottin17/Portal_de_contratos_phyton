@@ -1292,32 +1292,55 @@ with ab_venc:
         if sem_data > 0.01:
             st.caption(f"Obs.: {brl(sem_data)} sem data definida (não aparece no gráfico).")
 
-        # detalhe por data
-        st.markdown("#### 🔎 Detalhe por data (contratos vencendo)")
-        filtro = st.radio("Mostrar", ["Todos", "Vencidos", "Próximos 30 dias",
-                                      "Próximos 90 dias"], horizontal=True)
-        det = tl.copy()
-        if filtro == "Vencidos":
-            det = det[det["DATA"].notna() & (det["DATA"] < hoje)]
-        elif filtro == "Próximos 30 dias":
-            det = det[det["DATA"].notna() & (det["DATA"] >= hoje)
-                      & (det["DATA"] <= hoje + pd.Timedelta(days=30))]
-        elif filtro == "Próximos 90 dias":
-            det = det[det["DATA"].notna() & (det["DATA"] >= hoje)
-                      & (det["DATA"] <= hoje + pd.Timedelta(days=90))]
-        det = det.sort_values("DATA", na_position="last")
-        det["Situação"] = np.where(det["DATA"].isna(), "⚪ Sem data",
-                          np.where(det["DATA"] < hoje, "🔴 Vencido", "🟢 A vencer"))
-        det["Data"] = det["DATA"].dt.strftime("%d/%m/%Y").fillna("—")
-        det = det.rename(columns={"CATEGORIA": "Tipo", "VALOR": "Valor R$"})
-        cols = ["Data", "Situação", "Tipo", "Contrato", "Cliente", "Valor R$"]
-        st.caption(f"{len(det)} lançamentos • Total {brl(det['Valor R$'].sum())}")
-        st.dataframe(fmt_df(det[cols], brl_cols=["Valor R$"]),
-                     width="stretch", hide_index=True)
+        # detalhe consolidado por contrato e data (1 linha por contrato x data)
+        st.markdown("#### 🔎 Consolidado por contrato e data")
+        datas_ok = tl["DATA"].dropna()
+        base = tl
+        if not datas_ok.empty:
+            dmin, dmax = datas_ok.min().date(), datas_ok.max().date()
+            cflt = st.columns([3, 1])
+            with cflt[0]:
+                periodo = st.date_input(
+                    "Filtrar por data (vencimento / data limite)",
+                    value=(dmin, dmax), min_value=dmin, max_value=dmax,
+                    format="DD/MM/YYYY")
+            with cflt[1]:
+                incl_sd = st.checkbox("Incluir sem data", value=True)
+            if isinstance(periodo, (list, tuple)) and len(periodo) == 2:
+                d0, d1 = pd.Timestamp(periodo[0]), pd.Timestamp(periodo[1])
+                m = tl["DATA"].notna() & (tl["DATA"] >= d0) & (tl["DATA"] <= d1)
+                if incl_sd:
+                    m = m | tl["DATA"].isna()
+                base = tl[m]
+
+        g = base.copy()
+        g["FAT"] = np.where(g["CATEGORIA"] == "Faturado (a receber)", g["VALOR"], 0.0)
+        g["AFAT"] = np.where(g["CATEGORIA"] == "Falta faturar", g["VALOR"], 0.0)
+        cons = (g.groupby(["CONTRATO_ID", "DATA"], dropna=False)
+                .agg(Contrato=("Contrato", "first"), Cliente=("Cliente", "first"),
+                     FAT=("FAT", "sum"), AFAT=("AFAT", "sum")).reset_index())
+        cons["TOTAL"] = cons["FAT"] + cons["AFAT"]
+        cons = cons.sort_values(["DATA", "Contrato"], na_position="last")
+        cons["Situação"] = np.where(cons["DATA"].isna(), "⚪ Sem data",
+                           np.where(cons["DATA"] < hoje, "🔴 Vencido", "🟢 A vencer"))
+        cons["Data"] = cons["DATA"].dt.strftime("%d/%m/%Y").fillna("—")
+        cons = cons.rename(columns={
+            "FAT": "Faturado R$", "AFAT": "A Faturar R$", "TOTAL": "Total a Receber R$"})
+        cols = ["Data", "Situação", "Contrato", "Cliente",
+                "Faturado R$", "A Faturar R$", "Total a Receber R$"]
+        st.caption(
+            f"{len(cons)} linhas (contrato × data)  •  "
+            f"Faturado {brl(cons['Faturado R$'].sum())}  ·  "
+            f"A faturar {brl(cons['A Faturar R$'].sum())}  ·  "
+            f"Total a receber {brl(cons['Total a Receber R$'].sum())}")
+        st.dataframe(
+            fmt_df(cons[cols], brl_cols=["Faturado R$", "A Faturar R$",
+                                         "Total a Receber R$"]),
+            width="stretch", hide_index=True)
         st.download_button(
-            "⬇️ A receber por data (CSV)",
-            det[cols].to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
-            "a_receber_por_data.csv", "text/csv")
+            "⬇️ A receber consolidado (CSV)",
+            cons[cols].to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
+            "a_receber_consolidado.csv", "text/csv")
 
 # ---- EXPORT ----
 st.sidebar.divider()
