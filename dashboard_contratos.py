@@ -1136,56 +1136,25 @@ with ab_fin:
                 fig.update_traces(marker_color=VERDE)
                 st.plotly_chart(estilo(fig), width="stretch")
 
-            # ---- Em quais contas o dinheiro foi depositado ----
-            st.markdown("#### 🏦 Em quais contas o dinheiro foi depositado")
+            # ---- Conta de deposito por contrato (para a coluna da tabela) ----
+            # Conta principal = a que recebeu o maior valor do contrato; se houver
+            # mais de uma, indica "(+N)". Respeita os filtros (contratos visiveis).
             try:
                 cd_all = carregar_contas_deposito(tick if auto else 0)
-            except Exception as e:  # noqa: BLE001
-                st.warning("Não foi possível carregar as contas de depósito.")
-                st.code(str(e))
+            except Exception:  # noqa: BLE001
                 cd_all = pd.DataFrame()
-            if cd_all.empty:
-                st.info("Sem informações de contas de depósito.")
-            else:
-                # respeita os filtros (so contratos visiveis) e conta cada baixa 1x
+            conta_ctr = {}
+            if not cd_all.empty:
                 cd = (cd_all[cd_all["CONTRATO_ID"].isin(ids_visiveis)]
                       .drop_duplicates("BAIXA_ID"))
-                if cd.empty:
-                    st.info("Sem depósitos para os filtros selecionados.")
-                else:
-                    por_conta = (cd.groupby(["CONTA", "TIPO_CONTA"])["VL_DEPOSITADO"]
-                                 .sum().reset_index()
-                                 .sort_values("VL_DEPOSITADO", ascending=False))
-                    tot_dep = por_conta["VL_DEPOSITADO"].sum()
-                    em_banco = por_conta.loc[por_conta["TIPO_CONTA"] == "Banco",
-                                             "VL_DEPOSITADO"].sum()
-                    n_contas = int((por_conta["CONTA"] != "Sem conta (adiant./crédito)").sum())
-                    kd = st.columns(3)
-                    kd[0].metric("Total depositado", brl(tot_dep), delta_color="off")
-                    kd[1].metric("Em contas bancárias", brl(em_banco),
-                                 f"{(em_banco/tot_dep*100 if tot_dep else 0):.1f}% do total",
-                                 delta_color="off")
-                    kd[2].metric("Contas/caixas distintas", num(n_contas), delta_color="off")
-
-                    plot = por_conta.head(15).sort_values("VL_DEPOSITADO")
-                    fig = px.bar(plot, x="VL_DEPOSITADO", y="CONTA", orientation="h",
-                                 color="TIPO_CONTA",
-                                 color_discrete_map={"Banco": VERDE_ESCURO,
-                                                     "Caixa": VERDE_CLARO, "—": CINZA},
-                                 title="Depósitos por conta (R$)", **PX)
-                    fig.update_layout(height=480, yaxis_title=None,
-                                      legend_title_text="Tipo")
-                    st.plotly_chart(estilo(fig), width="stretch")
-
-                    st.dataframe(fmt_df(por_conta.rename(columns={
-                        "CONTA": "Conta", "TIPO_CONTA": "Tipo",
-                        "VL_DEPOSITADO": "Depositado R$"}),
-                        brl_cols=["Depositado R$"]), width="stretch", hide_index=True)
-                    st.caption(
-                        "A conta é identificada pela forma de pagamento de cada baixa. "
-                        "**Sem conta** = recebido por adiantamento/crédito/compensação "
-                        "(sem conta bancária ou caixa registrada).")
-            st.divider()
+                if not cd.empty:
+                    pc = (cd.groupby(["CONTRATO_ID", "CONTA"])["VL_DEPOSITADO"]
+                          .sum().reset_index().sort_values("VL_DEPOSITADO", ascending=False))
+                    principal = pc.drop_duplicates("CONTRATO_ID").set_index("CONTRATO_ID")["CONTA"]
+                    nconta = pc.groupby("CONTRATO_ID")["CONTA"].nunique()
+                    for cid, conta in principal.items():
+                        extra = int(nconta.get(cid, 1)) - 1
+                        conta_ctr[cid] = conta + (f"  (+{extra})" if extra > 0 else "")
 
             # conciliacao por contrato
             st.markdown("#### 📋 Conciliação por contrato")
@@ -1204,14 +1173,17 @@ with ab_fin:
             gc["SIT"] = np.where(gc["VL_SALDO"] <= 0.01, "Quitado",
                         np.where(gc["VENCIDO"] > 0, "Tem vencido",
                         np.where(gc["VL_REC_PAG"] > 0.01, "Parcial", "A vencer")))
+            gc["CONTA"] = gc["CONTRATO_ID"].map(conta_ctr).fillna("—")
             gc = gc.sort_values("VL_SALDO", ascending=False)
             gtab = gc.rename(columns={
                 "NUMERO": "Contrato", "CLIENTE": "Cliente", "PRODUTOR": "Produtor",
                 "SAFRA": "Safra", "VL_PARCELA": "Titulado R$",
                 "VL_REC_PAG": "Recebido R$", "VL_SALDO": "A Receber R$",
-                "PARCELAS": "Parcelas", "PCT_REC": "% Receb.", "SIT": "Situação"})
+                "PARCELAS": "Parcelas", "PCT_REC": "% Receb.", "SIT": "Situação",
+                "CONTA": "Conta do depósito"})
             colf = ["Contrato", "Cliente", "Produtor", "UF", "Safra", "Titulado R$",
-                    "Recebido R$", "A Receber R$", "Parcelas", "% Receb.", "Situação"]
+                    "Recebido R$", "A Receber R$", "Parcelas", "% Receb.", "Situação",
+                    "Conta do depósito"]
             st.dataframe(
                 fmt_df(gtab[colf], brl_cols=["Titulado R$", "Recebido R$",
                                              "A Receber R$"], pct_cols=["% Receb."]),
