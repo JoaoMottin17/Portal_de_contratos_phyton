@@ -484,7 +484,11 @@ if auto:
     else:
         st.sidebar.warning("Rode: pip install streamlit-autorefresh")
 if st.sidebar.button("🔄 Atualizar agora"):
+    # recarrega os dados e RESSINCRONIZA os filtros (bump da versao -> widgets
+    # voltam aos defaults derivados dos dados novos, ex.: safra mais recente).
+    st.session_state["filtros_v"] = st.session_state.get("filtros_v", 0) + 1
     carregar_dados.clear()
+    carregar_financeiro.clear()
     st.rerun()
 
 try:
@@ -498,35 +502,46 @@ st.caption(f"Conectado em `{dsn}`  •  {len(itens):,} itens  •  "
            f"auto-atualização: {'ligada ('+str(intervalo)+' min)' if auto else 'desligada'}")
 
 # ---- Filtros ----
+# Versao dos filtros: ao clicar "Atualizar agora" ela muda, trocando as chaves
+# dos widgets e fazendo-os voltar aos defaults derivados dos dados recem-lidos.
+fv = st.session_state.get("filtros_v", 0)
 st.sidebar.header("Filtros")
 tipos = sorted(t for t in itens["TIPO_ES"].dropna().unique())
 rotulo_tipo = {"S": "Saída (Venda)", "E": "Entrada (Compra)"}
 sel_tipo = st.sidebar.multiselect("Tipo de contrato", options=tipos,
                                   default=["S"] if "S" in tipos else tipos,
-                                  format_func=lambda t: rotulo_tipo.get(t, t))
-incluir_cancelados = st.sidebar.checkbox("Incluir cancelados", value=False)
+                                  format_func=lambda t: rotulo_tipo.get(t, t),
+                                  key=f"f_tipo_{fv}")
+incluir_cancelados = st.sidebar.checkbox("Incluir cancelados", value=False,
+                                         key=f"f_canc_{fv}")
 moedas = sorted(itens["MOEDA"].unique())
-sel_moeda = st.sidebar.multiselect("Moeda", options=moedas, default=moedas)
+sel_moeda = st.sidebar.multiselect("Moeda", options=moedas, default=moedas,
+                                   key=f"f_moeda_{fv}")
 ufs = sorted(u for u in itens["UF"].unique() if u)
 sel_uf = st.sidebar.multiselect(
     "Estado (UF)", options=ufs, default=ufs,
-    format_func=lambda u: "Sem UF" if u == "S/UF" else f"{u} — {UF_NOMES.get(u, u)}")
+    format_func=lambda u: "Sem UF" if u == "S/UF" else f"{u} — {UF_NOMES.get(u, u)}",
+    key=f"f_uf_{fv}")
 produtores = sorted(p for p in itens["PRODUTOR"].unique() if p)
-sel_prod = st.sidebar.multiselect("Produtor", options=produtores, default=[])
+sel_prod = st.sidebar.multiselect("Produtor", options=produtores, default=[],
+                                  key=f"f_prod_{fv}")
 safras = sorted(s for s in itens["SAFRA"].unique() if s)
 # Padrao: abre so com a safra mais recente marcada (nao todas), para o painel
 # vir focado na safra atual ao atualizar. O usuario pode marcar as demais.
 sel_safra = st.sidebar.multiselect("Safra", options=safras,
-                                   default=[safras[-1]] if safras else [])
+                                   default=[safras[-1]] if safras else [],
+                                   key=f"f_safra_{fv}")
 clientes = sorted(c for c in itens["CLIENTE"].unique() if c)
-sel_cliente = st.sidebar.multiselect("Cliente", options=clientes, default=[])
+sel_cliente = st.sidebar.multiselect("Cliente", options=clientes, default=[],
+                                     key=f"f_cliente_{fv}")
 produtos_lista = sorted(p for p in itens["PRODUTO"].unique() if p)
-sel_produto = st.sidebar.multiselect("Produto", options=produtos_lista, default=[])
+sel_produto = st.sidebar.multiselect("Produto", options=produtos_lista, default=[],
+                                     key=f"f_produto_{fv}")
 sit_opcoes = ["A faturar", "Parcial", "Faturado", "Excedente", "Cancelado"]
 sel_sit = st.sidebar.multiselect(
     "Situação", options=sit_opcoes,
-    default=["A faturar", "Parcial", "Faturado", "Excedente"])
-busca = st.sidebar.text_input("Buscar (nº / produto / obs)")
+    default=["A faturar", "Parcial", "Faturado", "Excedente"], key=f"f_sit_{fv}")
+busca = st.sidebar.text_input("Buscar (nº / produto / obs)", key=f"f_busca_{fv}")
 
 df = itens.copy()
 if sel_tipo:
@@ -634,6 +649,28 @@ def agrega_contrato(d):
 contratos = agrega_contrato(df)
 PX = dict(template="plotly_white")
 
+
+def estilo(fig):
+    """Padroniza as caixas de hover dos graficos: numeros em pt-BR (1.162.688),
+    sem sufixo SI (nada de '1.16M'), e caixa branca elegante com a fonte da marca."""
+    fig.update_layout(
+        separators=",.",                       # decimal ',' e milhar '.'
+        font=dict(family="Inter, 'Segoe UI', Arial, sans-serif", color=VERDE_ESCURO),
+        hoverlabel=dict(
+            bgcolor="white", bordercolor=VERDE_CLARO, align="left",
+            font=dict(family="Inter, 'Segoe UI', Arial, sans-serif",
+                      size=13, color=VERDE_ESCURO)),
+        legend=dict(title_font=dict(color=VERDE_ESCURO)),
+    )
+    # barras/linhas: o numero segue o hoverformat do eixo de valor
+    fig.update_xaxes(hoverformat=",.0f")
+    fig.update_yaxes(hoverformat=",.0f")
+    # pizzas: valor + percentual formatados
+    fig.update_traces(
+        selector=dict(type="pie"),
+        hovertemplate="<b>%{label}</b><br>%{value:,.0f}  •  %{percent}<extra></extra>")
+    return fig
+
 (ab_geral, ab_contr, ab_prod, ab_cli, ab_item, ab_fat, ab_ent,
  ab_fin) = st.tabs(
     ["📊 Visão Geral", "📑 Contratos", "🧑‍🌾 Produtores / Estados",
@@ -658,13 +695,13 @@ with ab_geral:
                  title=f"Faturado x A Faturar por Safra ({ytit})",
                  color_discrete_map={"Faturado": COR_FATURADO, "A Faturar": COR_A_FATURAR},
                  **PX)
-    c1.plotly_chart(fig, width="stretch")
+    c1.plotly_chart(estilo(fig), width="stretch")
 
     sc = contratos.groupby("SITUACAO")["SC_CONTR"].sum().reset_index()
     fig = px.pie(sc, names="SITUACAO", values="SC_CONTR", hole=0.45,
                  title="Volume contratado por situação", color="SITUACAO",
                  color_discrete_map=COR_SITUACAO, **PX)
-    c2.plotly_chart(fig, width="stretch")
+    c2.plotly_chart(estilo(fig), width="stretch")
 
     pe = (df.groupby("ESTADO")[[cfat, csaldo]].sum().reset_index()
           .rename(columns={cfat: "Faturado", csaldo: "A Faturar"})
@@ -674,7 +711,7 @@ with ab_geral:
                  title=f"Faturado x A Faturar por Estado ({ytit})",
                  color_discrete_map={"Faturado": COR_FATURADO, "A Faturar": COR_A_FATURAR},
                  **PX)
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(estilo(fig), width="stretch")
 
     if not mv_f.empty:
         m = mv_f.copy()
@@ -683,7 +720,7 @@ with ab_geral:
         fig = px.bar(serie, x="MES", y="VL_FAT",
                      title="Faturamento mensal R$ (NF emitidas)", **PX)
         fig.update_traces(marker_color=VERDE)
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(estilo(fig), width="stretch")
 
 # ======== CONTRATOS ========
 with ab_contr:
@@ -777,7 +814,7 @@ with ab_prod:
                  color_discrete_map={"Faturado": COR_FATURADO, "A Faturar": COR_A_FATURAR},
                  **PX)
     fig.update_layout(height=450)
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(estilo(fig), width="stretch")
     st.dataframe(fmt_df(pp.rename(columns={
         "PRODUTOR": "Produtor", "SC_FAT": "Sc Faturadas", "SC_SALDO": "Sc a Faturar",
         "VL_FATURADO": "Faturado R$", "VL_AF_EST": "A Faturar R$ (est.)"}),
@@ -795,7 +832,7 @@ with ab_prod:
                  title="Sacas faturadas por Estado",
                  color_discrete_sequence=[VERDE_ESCURO, VERDE_MEDIO, VERDE_CLARO,
                                           TEAL, VERDE_PALIDO], **PX)
-    c1.plotly_chart(fig, width="stretch")
+    c1.plotly_chart(estilo(fig), width="stretch")
     c2.dataframe(fmt_df(pest.rename(columns={
         "ESTADO": "Estado", "SC_FAT": "Sc Faturadas", "SC_SALDO": "Sc a Faturar",
         "VL_FATURADO": "Faturado R$", "VL_AF_EST": "A Faturar R$ (est.)"})[
@@ -818,7 +855,7 @@ with ab_cli:
                  color_discrete_map={"Faturado": COR_FATURADO, "A Faturar": COR_A_FATURAR},
                  **PX)
     fig.update_layout(height=600)
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(estilo(fig), width="stretch")
     st.dataframe(fmt_df(pc.rename(columns={
         "CLIENTE": "Cliente", "SC_FAT": "Sc Faturadas", "SC_SALDO": "Sc a Faturar",
         "VL_FATURADO": "Faturado R$", "VL_AF_EST": "A Faturar R$ (est.)"}),
@@ -841,7 +878,7 @@ with ab_item:
                  color_discrete_map={"Faturado": COR_FATURADO, "A Faturar": COR_A_FATURAR},
                  **PX)
     fig.update_layout(height=600)
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(estilo(fig), width="stretch")
     st.dataframe(fmt_df(pp2.rename(columns={
         "PRODUTO": "Produto", "SC_CONTR": "Sc Contratadas", "SC_FAT": "Sc Faturadas",
         "SC_SALDO": "Sc a Faturar", "VL_FATURADO": "Faturado R$",
@@ -868,10 +905,10 @@ with ab_fat:
         c1, c2 = st.columns(2)
         fig = px.bar(sp, x="Semana", y="VL_FAT", title="Faturado por semana (R$)", **PX)
         fig.update_traces(marker_color=VERDE)
-        c1.plotly_chart(fig, width="stretch")
+        c1.plotly_chart(estilo(fig), width="stretch")
         fig = px.bar(sp, x="Semana", y="SC", title="Faturado por semana (sacas)", **PX)
         fig.update_traces(marker_color=VERDE_CLARO)
-        c2.plotly_chart(fig, width="stretch")
+        c2.plotly_chart(estilo(fig), width="stretch")
 
         k = st.columns(4)
         k[0].metric("Semana recente (R$)", brl(sem["VL_FAT"].iloc[-1]),
@@ -937,7 +974,7 @@ with ab_ent:
         fig = px.bar(gm, x="MES", y="SC_SALDO",
                      title="Sacas a entregar por mês limite", **PX)
         fig.update_traces(marker_color=VERDE)
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(estilo(fig), width="stretch")
 
     icone = {"Vencido": "🔴 Vencido", "Vence ≤30d": "🟡 Vence ≤30d",
              "No prazo": "🟢 No prazo", "Sem data": "⚪ Sem data",
@@ -1036,12 +1073,12 @@ with ab_fin:
                              title="Saldo a receber por idade (R$)",
                              color_discrete_map=cor_ag, **PX)
                 fig.update_layout(showlegend=False)
-                c1.plotly_chart(fig, width="stretch")
+                c1.plotly_chart(estilo(fig), width="stretch")
             # situacao
             sf2 = fin.groupby("SITUACAO_FIN")["VL_PARCELA"].sum().reset_index()
             fig = px.pie(sf2, names="SITUACAO_FIN", values="VL_PARCELA", hole=0.45,
                          title="Titulado por situação", **PX)
-            c2.plotly_chart(fig, width="stretch")
+            c2.plotly_chart(estilo(fig), width="stretch")
 
             # recebido por mes
             if not quit_.empty:
@@ -1050,7 +1087,7 @@ with ab_fin:
                 fig = px.bar(gm, x="MES", y="VL_REC_PAG",
                              title="Recebido por mês (R$, por data de quitação)", **PX)
                 fig.update_traces(marker_color=VERDE)
-                st.plotly_chart(fig, width="stretch")
+                st.plotly_chart(estilo(fig), width="stretch")
 
             # conciliacao por contrato
             st.markdown("#### 📋 Conciliação por contrato")
