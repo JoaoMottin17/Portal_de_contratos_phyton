@@ -475,6 +475,11 @@ st.markdown(
       [data-testid="stSidebar"] [data-testid="stTickBarMax"] {{ color:#9CC79C !important; }}
       /* divisorias claras */
       [data-testid="stSidebar"] hr {{ border-color: rgba(255,255,255,.12); }}
+      /* logo no topo da sidebar dentro de cartao branco */
+      [data-testid="stSidebar"] [data-testid="stImage"] {{
+          background:#FFFFFF; border-radius:14px; padding:10px 12px;
+          box-shadow:0 2px 8px rgba(0,0,0,.18);
+      }}
     </style>""", unsafe_allow_html=True)
 
 _logo = achar_logo()
@@ -490,6 +495,10 @@ st.markdown(
     f"<p style='color:{VERDE};font-size:15px;margin-top:2px'>"
     "Volume em kg e sacas (60 kg) • valores em Real e Dólar</p>",
     unsafe_allow_html=True)
+
+# ---- Logo no topo da sidebar (cartao branco, estilo app) ----
+if _logo:
+    st.sidebar.image(_logo, use_container_width=True)
 
 # ---- Atualizacao automatica ----
 st.sidebar.header("Atualização")
