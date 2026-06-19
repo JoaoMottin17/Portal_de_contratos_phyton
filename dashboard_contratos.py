@@ -451,7 +451,8 @@ st.markdown(
     f"""<style>
       .stApp {{ background-color:#FFFFFF; }}
       [data-testid="stMetric"] {{ background:{VERDE_PALIDO}33;
-          border:1px solid {VERDE_PALIDO}; border-radius:12px; padding:10px 14px; }}
+          border:1px solid {VERDE_PALIDO}; border-radius:12px; padding:12px 16px;
+          min-height:120px; display:flex; flex-direction:column; justify-content:center; }}
       [data-testid="stMetricValue"] {{ color:{VERDE_ESCURO}; font-size:1.35rem; }}
       h1,h2,h3 {{ color:{VERDE_ESCURO}; }}
     </style>""", unsafe_allow_html=True)
