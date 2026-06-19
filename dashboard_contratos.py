@@ -455,6 +455,26 @@ st.markdown(
           min-height:120px; display:flex; flex-direction:column; justify-content:center; }}
       [data-testid="stMetricValue"] {{ color:{VERDE_ESCURO}; font-size:1.35rem; }}
       h1,h2,h3 {{ color:{VERDE_ESCURO}; }}
+
+      /* ---- Sidebar verde-escuro (estilo app) ---- */
+      [data-testid="stSidebar"] {{
+          background: linear-gradient(180deg, #14401E 0%, #0E2F16 100%);
+      }}
+      /* cabecalhos da sidebar (Atualizacao, Filtros, Exportar) em branco */
+      [data-testid="stSidebar"] h1,
+      [data-testid="stSidebar"] h2,
+      [data-testid="stSidebar"] h3 {{ color:#FFFFFF !important; }}
+      /* rotulos dos filtros e legendas em verde-claro */
+      [data-testid="stSidebar"] label,
+      [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+      [data-testid="stSidebar"] [data-testid="stCaptionContainer"],
+      [data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {{ color:#DCEBD6 !important; }}
+      /* slider: valor atual e rotulos das pontas */
+      [data-testid="stSidebar"] [data-testid="stThumbValue"] {{ color:#FFFFFF !important; }}
+      [data-testid="stSidebar"] [data-testid="stTickBarMin"],
+      [data-testid="stSidebar"] [data-testid="stTickBarMax"] {{ color:#9CC79C !important; }}
+      /* divisorias claras */
+      [data-testid="stSidebar"] hr {{ border-color: rgba(255,255,255,.12); }}
     </style>""", unsafe_allow_html=True)
 
 _logo = achar_logo()
