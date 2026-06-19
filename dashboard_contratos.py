@@ -266,6 +266,16 @@ def carregar_dados(_tick=0):
         return "Parcial"
 
     itens["SITUACAO"] = itens.apply(_sit, axis=1)
+
+    # Contrato/item FECHADO (CONTRATOS_ITENS.STATUS = 'F'): desconsidera saldo
+    # a faturar e volume (nao ha mais entrega) — fica so o que foi faturado.
+    if "ST_ITEM" not in itens.columns:
+        itens["ST_ITEM"] = "A"
+    itens["ST_ITEM"] = itens["ST_ITEM"].fillna("A").astype(str).str.strip().str.upper()
+    fech = itens["ST_ITEM"].eq("F")
+    for _c in ("QT_SALDO_KG", "QT_EXC_KG", "SC_SALDO", "VL_AF_EST"):
+        itens.loc[fech, _c] = 0.0
+    itens.loc[fech, "PCT_FAT"] = 100.0
     return itens, movto, dsn
 
 
@@ -548,6 +558,12 @@ except Exception as e:  # noqa: BLE001
 
 st.caption(f"Conectado em `{dsn}`  •  {len(itens):,} itens  •  "
            f"auto-atualização: {'ligada ('+str(intervalo)+' min)' if auto else 'desligada'}")
+
+# Contratos FECHADOS = todos os itens com STATUS 'F' (sem nenhum item aberto).
+# Nesses, alem do saldo a faturar/volume (zerado por item em carregar_dados),
+# tambem desconsideramos o saldo a receber no financeiro.
+_st_ctr = itens.groupby("CONTRATO_ID")["ST_ITEM"].apply(lambda s: bool((s == "F").all()))
+fechados = set(_st_ctr[_st_ctr].index)
 
 # ---- Filtros ----
 # Versao dos filtros: ao clicar "Atualizar agora" ela muda, trocando as chaves
@@ -1065,6 +1081,8 @@ with ab_fin:
         # respeita os filtros: so contratos visiveis na selecao atual
         ids_visiveis = set(df["CONTRATO_ID"].unique())
         fin = fin_all[fin_all["CONTRATO_ID"].isin(ids_visiveis)].copy()
+        # contratos fechados: desconsidera o saldo a receber (residual)
+        fin.loc[fin["CONTRATO_ID"].isin(fechados), "VL_SALDO"] = 0.0
         if fin.empty:
             st.info("Nenhum recebível para os filtros selecionados.")
         else:
@@ -1245,7 +1263,8 @@ with ab_venc:
         fin_all_v = pd.DataFrame()
     if not fin_all_v.empty:
         fr = fin_all_v[fin_all_v["CONTRATO_ID"].isin(ids_vis)
-                       & (fin_all_v["VL_SALDO"] > 0.01)].copy()
+                       & (fin_all_v["VL_SALDO"] > 0.01)
+                       & ~fin_all_v["CONTRATO_ID"].isin(fechados)].copy()
         info = (df.drop_duplicates("CONTRATO_ID")
                 .set_index("CONTRATO_ID")[["NUMERO", "CLIENTE"]])
         fr = fr.join(info, on="CONTRATO_ID")
