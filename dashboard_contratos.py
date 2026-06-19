@@ -1262,39 +1262,7 @@ with ab_venc:
     if tl.empty:
         st.info("Nada a receber/faturar para os filtros selecionados.")
     else:
-        fat_rec = tl.loc[tl["CATEGORIA"] == "Faturado (a receber)", "VALOR"].sum()
-        falta = tl.loc[tl["CATEGORIA"] == "Falta faturar", "VALOR"].sum()
-        total = fat_rec + falta
-        venc = tl[tl["DATA"].notna() & (tl["DATA"] < hoje)]["VALOR"].sum()
-        prox30 = tl[tl["DATA"].notna() & (tl["DATA"] >= hoje)
-                    & (tl["DATA"] <= hoje + pd.Timedelta(days=30))]["VALOR"].sum()
-        k = st.columns(4)
-        k[0].metric("Total a receber", brl(total), delta_color="off")
-        k[1].metric("Faturado (a receber)", brl(fat_rec),
-                    f"{(fat_rec/total*100 if total else 0):.0f}% do total", delta_color="off")
-        k[2].metric("Falta faturar", brl(falta),
-                    f"{(falta/total*100 if total else 0):.0f}% do total", delta_color="off")
-        k[3].metric("Vencido / atrasado", brl(venc),
-                    f"próx. 30 dias: {brl(prox30)}", delta_color="off")
-        st.divider()
-
-        # grafico empilhado por mes
-        tlm = tl[tl["DATA"].notna()].copy()
-        tlm["MES"] = tlm["DATA"].dt.to_period("M").dt.to_timestamp()
-        gm = tlm.groupby(["MES", "CATEGORIA"])["VALOR"].sum().reset_index()
-        if not gm.empty:
-            fig = px.bar(gm, x="MES", y="VALOR", color="CATEGORIA", barmode="stack",
-                         title="A receber por mês (R$) — Faturado x A Faturar",
-                         color_discrete_map={"Faturado (a receber)": VERDE_ESCURO,
-                                             "Falta faturar": VERDE_CLARO}, **PX)
-            fig.update_layout(xaxis_title=None, yaxis_title="R$", legend_title_text="")
-            st.plotly_chart(estilo(fig), width="stretch")
-        sem_data = tl[tl["DATA"].isna()]["VALOR"].sum()
-        if sem_data > 0.01:
-            st.caption(f"Obs.: {brl(sem_data)} sem data definida (não aparece no gráfico).")
-
-        # filtro de data + cartoes (1 por contrato, consolidando o periodo)
-        st.markdown("#### 🔎 A receber por contrato")
+        # ---- Filtro de data (vincula os cards de soma, o grafico e a tabela) ----
         datas_ok = tl["DATA"].dropna()
         base = tl
         if not datas_ok.empty:
@@ -1314,53 +1282,40 @@ with ab_venc:
                     m = m | tl["DATA"].isna()
                 base = tl[m]
 
+        # ---- Cards das SOMAS (refletem o filtro de data) ----
+        fat_rec = base.loc[base["CATEGORIA"] == "Faturado (a receber)", "VALOR"].sum()
+        falta = base.loc[base["CATEGORIA"] == "Falta faturar", "VALOR"].sum()
+        total = fat_rec + falta
+        venc = base[base["DATA"].notna() & (base["DATA"] < hoje)]["VALOR"].sum()
+        k = st.columns(4)
+        k[0].metric("Total a receber", brl(total), delta_color="off")
+        k[1].metric("Faturado (a receber)", brl(fat_rec),
+                    f"{(fat_rec/total*100 if total else 0):.0f}% do total", delta_color="off")
+        k[2].metric("Falta faturar", brl(falta),
+                    f"{(falta/total*100 if total else 0):.0f}% do total", delta_color="off")
+        k[3].metric("Vencido / atrasado", brl(venc), delta_color="off")
+        st.divider()
+
+        # ---- Grafico empilhado por mes (do periodo filtrado) ----
+        tlm = base[base["DATA"].notna()].copy()
+        tlm["MES"] = tlm["DATA"].dt.to_period("M").dt.to_timestamp()
+        gm = tlm.groupby(["MES", "CATEGORIA"])["VALOR"].sum().reset_index()
+        if not gm.empty:
+            fig = px.bar(gm, x="MES", y="VALOR", color="CATEGORIA", barmode="stack",
+                         title="A receber por mês (R$) — Faturado x A Faturar",
+                         color_discrete_map={"Faturado (a receber)": VERDE_ESCURO,
+                                             "Falta faturar": VERDE_CLARO}, **PX)
+            fig.update_layout(xaxis_title=None, yaxis_title="R$", legend_title_text="")
+            st.plotly_chart(estilo(fig), width="stretch")
+        sem_data = base[base["DATA"].isna()]["VALOR"].sum()
+        if sem_data > 0.01:
+            st.caption(f"Obs.: {brl(sem_data)} sem data definida (não aparece no gráfico).")
+
+        # ---- Tabela: 1 linha por contrato x data ----
+        st.markdown("#### 🔎 Consolidado por contrato e data")
         gb = base.copy()
         gb["FAT"] = np.where(gb["CATEGORIA"] == "Faturado (a receber)", gb["VALOR"], 0.0)
         gb["AFAT"] = np.where(gb["CATEGORIA"] == "Falta faturar", gb["VALOR"], 0.0)
-
-        porc = (gb.groupby("CONTRATO_ID")
-                .agg(Contrato=("Contrato", "first"), Cliente=("Cliente", "first"),
-                     FAT=("FAT", "sum"), AFAT=("AFAT", "sum"),
-                     DT_MIN=("DATA", "min"), NDATAS=("DATA", "nunique"))
-                .reset_index())
-        porc["TOTAL"] = porc["FAT"] + porc["AFAT"]
-        porc = porc[porc["TOTAL"] > 0.01].sort_values("TOTAL", ascending=False)
-
-        st.caption(
-            f"{len(porc)} contratos  •  Faturado {brl(porc['FAT'].sum())}  ·  "
-            f"A faturar {brl(porc['AFAT'].sum())}  ·  "
-            f"Total a receber {brl(porc['TOTAL'].sum())}")
-
-        NC = 3
-        regs = list(porc.itertuples(index=False))
-        for i in range(0, len(regs), NC):
-            for col, r in zip(st.columns(NC), regs[i:i + NC]):
-                with col:
-                    with st.container(border=True):
-                        dt = r.DT_MIN
-                        if pd.isna(dt):
-                            situ, cor = "⚪ Sem data", CINZA
-                        elif dt < hoje:
-                            situ, cor = "🔴 Vencido", "#C62828"
-                        else:
-                            situ, cor = "🟢 A vencer", VERDE_MEDIO
-                        dt_txt = dt.strftime("%d/%m/%Y") if pd.notna(dt) else "—"
-                        st.markdown(
-                            f"<span style='font-size:.72rem;font-weight:700;color:{cor}'>{situ}</span>"
-                            f"<div style='font-family:Poppins,Inter,sans-serif;font-weight:700;"
-                            f"color:{VERDE_ESCURO};font-size:1rem;margin:.15rem 0 .1rem'>"
-                            f"{escape(str(r.Contrato))}</div>"
-                            f"<div style='color:#5B6B60;font-size:.82rem;line-height:1.25;"
-                            f"height:2.5em;overflow:hidden'>{escape(str(r.Cliente))}</div>"
-                            f"<div style='font-size:1.4rem;font-weight:800;color:{VERDE_ESCURO};"
-                            f"margin:.35rem 0 .15rem'>{brl(r.TOTAL)}</div>"
-                            f"<div style='font-size:.8rem;color:#3b4a40'>"
-                            f"Faturado: <b>{brl(r.FAT)}</b><br>A faturar: <b>{brl(r.AFAT)}</b></div>"
-                            f"<div style='font-size:.74rem;color:#93A096;margin-top:.45rem'>"
-                            f"📅 1º venc.: {dt_txt} · {int(r.NDATAS)} data(s)</div>",
-                            unsafe_allow_html=True)
-
-        # tabela detalhada por data (1 linha por contrato x data) em expander
         cons = (gb.groupby(["CONTRATO_ID", "DATA"], dropna=False)
                 .agg(Contrato=("Contrato", "first"), Cliente=("Cliente", "first"),
                      FAT=("FAT", "sum"), AFAT=("AFAT", "sum")).reset_index())
@@ -1373,15 +1328,15 @@ with ab_venc:
                                     "TOTAL": "Total a Receber R$"})
         colsd = ["Data", "Situação", "Contrato", "Cliente",
                  "Faturado R$", "A Faturar R$", "Total a Receber R$"]
-        with st.expander("📋 Ver tabela detalhada (1 linha por contrato × data)"):
-            st.dataframe(
-                fmt_df(cons[colsd], brl_cols=["Faturado R$", "A Faturar R$",
-                                              "Total a Receber R$"]),
-                width="stretch", hide_index=True)
-            st.download_button(
-                "⬇️ A receber consolidado (CSV)",
-                cons[colsd].to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
-                "a_receber_consolidado.csv", "text/csv")
+        st.caption(f"{len(cons)} linhas (contrato × data)")
+        st.dataframe(
+            fmt_df(cons[colsd], brl_cols=["Faturado R$", "A Faturar R$",
+                                          "Total a Receber R$"]),
+            width="stretch", hide_index=True)
+        st.download_button(
+            "⬇️ A receber consolidado (CSV)",
+            cons[colsd].to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
+            "a_receber_consolidado.csv", "text/csv")
 
 # ---- EXPORT ----
 st.sidebar.divider()
