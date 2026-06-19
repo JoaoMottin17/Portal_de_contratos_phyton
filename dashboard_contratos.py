@@ -719,10 +719,11 @@ def estilo(fig):
     return fig
 
 (ab_geral, ab_contr, ab_prod, ab_cli, ab_item, ab_fat, ab_ent,
- ab_fin) = st.tabs(
+ ab_fin, ab_venc) = st.tabs(
     ["📊 Visão Geral", "📑 Contratos", "🧑‍🌾 Produtores / Estados",
      "🏢 Clientes", "🌾 Produtos", "🧾 Faturamento (semana)",
-     "📅 Prazos de Entrega", "💰 Conciliação Financeira"])
+     "📅 Prazos de Entrega", "💰 Conciliação Financeira",
+     "📆 A Receber por Vencimento"])
 
 # ======== VISAO GERAL ========
 with ab_geral:
@@ -1217,6 +1218,106 @@ with ab_fin:
                 "⬇️ Recebíveis (CSV)",
                 fin.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
                 "recebiveis_contratos.csv", "text/csv")
+
+# ======== A RECEBER POR VENCIMENTO ========
+with ab_venc:
+    st.subheader("A Receber por Data — Faturado x A Faturar")
+    st.caption(
+        "Linha do tempo do que entra: **Faturado (a receber)** = títulos em aberto, "
+        "pela **data de vencimento**; **Falta faturar** = saldo dos contratos ainda não "
+        "faturado, pela **data limite de entrega**. Respeita os filtros da barra lateral.")
+
+    ids_vis = set(df["CONTRATO_ID"].unique())
+    hoje = pd.Timestamp.now().normalize()
+
+    # 1) Falta faturar (por DATA_LIMITE) — dos itens dos contratos
+    af = df[df["VL_AF_EST"] > 0.01]
+    af_tl = pd.DataFrame({
+        "DATA": af["DATA_LIMITE"], "CONTRATO_ID": af["CONTRATO_ID"],
+        "Contrato": af["NUMERO"], "Cliente": af["CLIENTE"],
+        "VALOR": af["VL_AF_EST"], "CATEGORIA": "Falta faturar"})
+
+    # 2) Faturado a receber (por DATA_VENCIMENTO) — dos titulos em aberto
+    try:
+        fin_all_v = carregar_financeiro(tick if auto else 0)
+    except Exception:  # noqa: BLE001
+        fin_all_v = pd.DataFrame()
+    if not fin_all_v.empty:
+        fr = fin_all_v[fin_all_v["CONTRATO_ID"].isin(ids_vis)
+                       & (fin_all_v["VL_SALDO"] > 0.01)].copy()
+        info = (df.drop_duplicates("CONTRATO_ID")
+                .set_index("CONTRATO_ID")[["NUMERO", "CLIENTE"]])
+        fr = fr.join(info, on="CONTRATO_ID")
+        fr_tl = pd.DataFrame({
+            "DATA": fr["DATA_VENCIMENTO"], "CONTRATO_ID": fr["CONTRATO_ID"],
+            "Contrato": fr["NUMERO"], "Cliente": fr["CLIENTE"],
+            "VALOR": fr["VL_SALDO"], "CATEGORIA": "Faturado (a receber)"})
+    else:
+        fr_tl = af_tl.iloc[0:0]
+
+    tl = pd.concat([af_tl, fr_tl], ignore_index=True)
+    tl["VALOR"] = pd.to_numeric(tl["VALOR"], errors="coerce").fillna(0.0)
+
+    if tl.empty:
+        st.info("Nada a receber/faturar para os filtros selecionados.")
+    else:
+        fat_rec = tl.loc[tl["CATEGORIA"] == "Faturado (a receber)", "VALOR"].sum()
+        falta = tl.loc[tl["CATEGORIA"] == "Falta faturar", "VALOR"].sum()
+        total = fat_rec + falta
+        venc = tl[tl["DATA"].notna() & (tl["DATA"] < hoje)]["VALOR"].sum()
+        prox30 = tl[tl["DATA"].notna() & (tl["DATA"] >= hoje)
+                    & (tl["DATA"] <= hoje + pd.Timedelta(days=30))]["VALOR"].sum()
+        k = st.columns(4)
+        k[0].metric("Total a receber", brl(total), delta_color="off")
+        k[1].metric("Faturado (a receber)", brl(fat_rec),
+                    f"{(fat_rec/total*100 if total else 0):.0f}% do total", delta_color="off")
+        k[2].metric("Falta faturar", brl(falta),
+                    f"{(falta/total*100 if total else 0):.0f}% do total", delta_color="off")
+        k[3].metric("Vencido / atrasado", brl(venc),
+                    f"próx. 30 dias: {brl(prox30)}", delta_color="off")
+        st.divider()
+
+        # grafico empilhado por mes
+        tlm = tl[tl["DATA"].notna()].copy()
+        tlm["MES"] = tlm["DATA"].dt.to_period("M").dt.to_timestamp()
+        gm = tlm.groupby(["MES", "CATEGORIA"])["VALOR"].sum().reset_index()
+        if not gm.empty:
+            fig = px.bar(gm, x="MES", y="VALOR", color="CATEGORIA", barmode="stack",
+                         title="A receber por mês (R$) — Faturado x A Faturar",
+                         color_discrete_map={"Faturado (a receber)": VERDE_ESCURO,
+                                             "Falta faturar": VERDE_CLARO}, **PX)
+            fig.update_layout(xaxis_title=None, yaxis_title="R$", legend_title_text="")
+            st.plotly_chart(estilo(fig), width="stretch")
+        sem_data = tl[tl["DATA"].isna()]["VALOR"].sum()
+        if sem_data > 0.01:
+            st.caption(f"Obs.: {brl(sem_data)} sem data definida (não aparece no gráfico).")
+
+        # detalhe por data
+        st.markdown("#### 🔎 Detalhe por data (contratos vencendo)")
+        filtro = st.radio("Mostrar", ["Todos", "Vencidos", "Próximos 30 dias",
+                                      "Próximos 90 dias"], horizontal=True)
+        det = tl.copy()
+        if filtro == "Vencidos":
+            det = det[det["DATA"].notna() & (det["DATA"] < hoje)]
+        elif filtro == "Próximos 30 dias":
+            det = det[det["DATA"].notna() & (det["DATA"] >= hoje)
+                      & (det["DATA"] <= hoje + pd.Timedelta(days=30))]
+        elif filtro == "Próximos 90 dias":
+            det = det[det["DATA"].notna() & (det["DATA"] >= hoje)
+                      & (det["DATA"] <= hoje + pd.Timedelta(days=90))]
+        det = det.sort_values("DATA", na_position="last")
+        det["Situação"] = np.where(det["DATA"].isna(), "⚪ Sem data",
+                          np.where(det["DATA"] < hoje, "🔴 Vencido", "🟢 A vencer"))
+        det["Data"] = det["DATA"].dt.strftime("%d/%m/%Y").fillna("—")
+        det = det.rename(columns={"CATEGORIA": "Tipo", "VALOR": "Valor R$"})
+        cols = ["Data", "Situação", "Tipo", "Contrato", "Cliente", "Valor R$"]
+        st.caption(f"{len(det)} lançamentos • Total {brl(det['Valor R$'].sum())}")
+        st.dataframe(fmt_df(det[cols], brl_cols=["Valor R$"]),
+                     width="stretch", hide_index=True)
+        st.download_button(
+            "⬇️ A receber por data (CSV)",
+            det[cols].to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
+            "a_receber_por_data.csv", "text/csv")
 
 # ---- EXPORT ----
 st.sidebar.divider()
