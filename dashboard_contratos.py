@@ -25,6 +25,7 @@ Como rodar:
 import os
 import glob
 from decimal import Decimal
+from html import escape
 
 import numpy as np
 import pandas as pd
@@ -1292,8 +1293,8 @@ with ab_venc:
         if sem_data > 0.01:
             st.caption(f"Obs.: {brl(sem_data)} sem data definida (não aparece no gráfico).")
 
-        # detalhe consolidado por contrato e data (1 linha por contrato x data)
-        st.markdown("#### 🔎 Consolidado por contrato e data")
+        # filtro de data + cartoes (1 por contrato, consolidando o periodo)
+        st.markdown("#### 🔎 A receber por contrato")
         datas_ok = tl["DATA"].dropna()
         base = tl
         if not datas_ok.empty:
@@ -1313,10 +1314,54 @@ with ab_venc:
                     m = m | tl["DATA"].isna()
                 base = tl[m]
 
-        g = base.copy()
-        g["FAT"] = np.where(g["CATEGORIA"] == "Faturado (a receber)", g["VALOR"], 0.0)
-        g["AFAT"] = np.where(g["CATEGORIA"] == "Falta faturar", g["VALOR"], 0.0)
-        cons = (g.groupby(["CONTRATO_ID", "DATA"], dropna=False)
+        gb = base.copy()
+        gb["FAT"] = np.where(gb["CATEGORIA"] == "Faturado (a receber)", gb["VALOR"], 0.0)
+        gb["AFAT"] = np.where(gb["CATEGORIA"] == "Falta faturar", gb["VALOR"], 0.0)
+
+        porc = (gb.groupby("CONTRATO_ID")
+                .agg(Contrato=("Contrato", "first"), Cliente=("Cliente", "first"),
+                     FAT=("FAT", "sum"), AFAT=("AFAT", "sum"),
+                     DT_MIN=("DATA", "min"), NDATAS=("DATA", "nunique"))
+                .reset_index())
+        porc["TOTAL"] = porc["FAT"] + porc["AFAT"]
+        porc = porc[porc["TOTAL"] > 0.01].sort_values("TOTAL", ascending=False)
+
+        st.caption(
+            f"{len(porc)} contratos  •  Faturado {brl(porc['FAT'].sum())}  ·  "
+            f"A faturar {brl(porc['AFAT'].sum())}  ·  "
+            f"Total a receber {brl(porc['TOTAL'].sum())}")
+
+        NC = 3
+        regs = list(porc.itertuples(index=False))
+        for i in range(0, len(regs), NC):
+            for col, r in zip(st.columns(NC), regs[i:i + NC]):
+                with col:
+                    with st.container(border=True):
+                        dt = r.DT_MIN
+                        if pd.isna(dt):
+                            situ, cor = "⚪ Sem data", CINZA
+                        elif dt < hoje:
+                            situ, cor = "🔴 Vencido", "#C62828"
+                        else:
+                            situ, cor = "🟢 A vencer", VERDE_MEDIO
+                        dt_txt = dt.strftime("%d/%m/%Y") if pd.notna(dt) else "—"
+                        st.markdown(
+                            f"<span style='font-size:.72rem;font-weight:700;color:{cor}'>{situ}</span>"
+                            f"<div style='font-family:Poppins,Inter,sans-serif;font-weight:700;"
+                            f"color:{VERDE_ESCURO};font-size:1rem;margin:.15rem 0 .1rem'>"
+                            f"{escape(str(r.Contrato))}</div>"
+                            f"<div style='color:#5B6B60;font-size:.82rem;line-height:1.25;"
+                            f"height:2.5em;overflow:hidden'>{escape(str(r.Cliente))}</div>"
+                            f"<div style='font-size:1.4rem;font-weight:800;color:{VERDE_ESCURO};"
+                            f"margin:.35rem 0 .15rem'>{brl(r.TOTAL)}</div>"
+                            f"<div style='font-size:.8rem;color:#3b4a40'>"
+                            f"Faturado: <b>{brl(r.FAT)}</b><br>A faturar: <b>{brl(r.AFAT)}</b></div>"
+                            f"<div style='font-size:.74rem;color:#93A096;margin-top:.45rem'>"
+                            f"📅 1º venc.: {dt_txt} · {int(r.NDATAS)} data(s)</div>",
+                            unsafe_allow_html=True)
+
+        # tabela detalhada por data (1 linha por contrato x data) em expander
+        cons = (gb.groupby(["CONTRATO_ID", "DATA"], dropna=False)
                 .agg(Contrato=("Contrato", "first"), Cliente=("Cliente", "first"),
                      FAT=("FAT", "sum"), AFAT=("AFAT", "sum")).reset_index())
         cons["TOTAL"] = cons["FAT"] + cons["AFAT"]
@@ -1324,23 +1369,19 @@ with ab_venc:
         cons["Situação"] = np.where(cons["DATA"].isna(), "⚪ Sem data",
                            np.where(cons["DATA"] < hoje, "🔴 Vencido", "🟢 A vencer"))
         cons["Data"] = cons["DATA"].dt.strftime("%d/%m/%Y").fillna("—")
-        cons = cons.rename(columns={
-            "FAT": "Faturado R$", "AFAT": "A Faturar R$", "TOTAL": "Total a Receber R$"})
-        cols = ["Data", "Situação", "Contrato", "Cliente",
-                "Faturado R$", "A Faturar R$", "Total a Receber R$"]
-        st.caption(
-            f"{len(cons)} linhas (contrato × data)  •  "
-            f"Faturado {brl(cons['Faturado R$'].sum())}  ·  "
-            f"A faturar {brl(cons['A Faturar R$'].sum())}  ·  "
-            f"Total a receber {brl(cons['Total a Receber R$'].sum())}")
-        st.dataframe(
-            fmt_df(cons[cols], brl_cols=["Faturado R$", "A Faturar R$",
-                                         "Total a Receber R$"]),
-            width="stretch", hide_index=True)
-        st.download_button(
-            "⬇️ A receber consolidado (CSV)",
-            cons[cols].to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
-            "a_receber_consolidado.csv", "text/csv")
+        cons = cons.rename(columns={"FAT": "Faturado R$", "AFAT": "A Faturar R$",
+                                    "TOTAL": "Total a Receber R$"})
+        colsd = ["Data", "Situação", "Contrato", "Cliente",
+                 "Faturado R$", "A Faturar R$", "Total a Receber R$"]
+        with st.expander("📋 Ver tabela detalhada (1 linha por contrato × data)"):
+            st.dataframe(
+                fmt_df(cons[colsd], brl_cols=["Faturado R$", "A Faturar R$",
+                                              "Total a Receber R$"]),
+                width="stretch", hide_index=True)
+            st.download_button(
+                "⬇️ A receber consolidado (CSV)",
+                cons[colsd].to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
+                "a_receber_consolidado.csv", "text/csv")
 
 # ---- EXPORT ----
 st.sidebar.divider()
