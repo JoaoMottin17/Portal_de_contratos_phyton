@@ -163,7 +163,7 @@ def _origem_pg():
 # ----------------------------------------------------------------------
 # CONSULTAS  (fonte unica em consultas.py — compartilhada com sync_dados.py)
 # ----------------------------------------------------------------------
-from consultas import SQL_ITENS, SQL_MOVTO, SQL_FIN  # noqa: E402
+from consultas import SQL_ITENS, SQL_MOVTO, SQL_FIN, SQL_FIN_CONTAS  # noqa: E402
 
 
 def _f(v):
@@ -320,6 +320,23 @@ def carregar_financeiro(_tick=0):
 
     fin["AGING"] = fin.apply(_aging, axis=1)
     return fin
+
+
+@st.cache_data(ttl=300, show_spinner="Carregando contas de depósito...")
+def carregar_contas_deposito(_tick=0):
+    """Em quais contas/caixas o dinheiro dos contratos foi depositado (read-only)."""
+    if FONTE_DADOS == "postgres":
+        cd = pd.read_sql("SELECT * FROM snap_contas", _engine_pg())
+    else:
+        (cd,), _ = _fetch_fb([SQL_FIN_CONTAS])
+    if cd.empty:
+        return cd
+    cd["VL_DEPOSITADO"] = pd.to_numeric(cd["VL_DEPOSITADO"], errors="coerce").fillna(0.0)
+    cd["DATA_PAG"] = pd.to_datetime(cd["DATA_PAG"], errors="coerce")
+    cd["CONTA"] = (cd["CONTA"].fillna("Sem conta (adiant./crédito)")
+                   .astype(str).str.strip().replace("", "Sem conta (adiant./crédito)"))
+    cd["TIPO_CONTA"] = cd["ST_CAIXA_BANCO"].map({"B": "Banco", "C": "Caixa"}).fillna("—")
+    return cd
 
 
 # ----------------------------------------------------------------------
@@ -1118,6 +1135,57 @@ with ab_fin:
                              title="Recebido por mês (R$, por data de quitação)", **PX)
                 fig.update_traces(marker_color=VERDE)
                 st.plotly_chart(estilo(fig), width="stretch")
+
+            # ---- Em quais contas o dinheiro foi depositado ----
+            st.markdown("#### 🏦 Em quais contas o dinheiro foi depositado")
+            try:
+                cd_all = carregar_contas_deposito(tick if auto else 0)
+            except Exception as e:  # noqa: BLE001
+                st.warning("Não foi possível carregar as contas de depósito.")
+                st.code(str(e))
+                cd_all = pd.DataFrame()
+            if cd_all.empty:
+                st.info("Sem informações de contas de depósito.")
+            else:
+                # respeita os filtros (so contratos visiveis) e conta cada baixa 1x
+                cd = (cd_all[cd_all["CONTRATO_ID"].isin(ids_visiveis)]
+                      .drop_duplicates("BAIXA_ID"))
+                if cd.empty:
+                    st.info("Sem depósitos para os filtros selecionados.")
+                else:
+                    por_conta = (cd.groupby(["CONTA", "TIPO_CONTA"])["VL_DEPOSITADO"]
+                                 .sum().reset_index()
+                                 .sort_values("VL_DEPOSITADO", ascending=False))
+                    tot_dep = por_conta["VL_DEPOSITADO"].sum()
+                    em_banco = por_conta.loc[por_conta["TIPO_CONTA"] == "Banco",
+                                             "VL_DEPOSITADO"].sum()
+                    n_contas = int((por_conta["CONTA"] != "Sem conta (adiant./crédito)").sum())
+                    kd = st.columns(3)
+                    kd[0].metric("Total depositado", brl(tot_dep), delta_color="off")
+                    kd[1].metric("Em contas bancárias", brl(em_banco),
+                                 f"{(em_banco/tot_dep*100 if tot_dep else 0):.1f}% do total",
+                                 delta_color="off")
+                    kd[2].metric("Contas/caixas distintas", num(n_contas), delta_color="off")
+
+                    plot = por_conta.head(15).sort_values("VL_DEPOSITADO")
+                    fig = px.bar(plot, x="VL_DEPOSITADO", y="CONTA", orientation="h",
+                                 color="TIPO_CONTA",
+                                 color_discrete_map={"Banco": VERDE_ESCURO,
+                                                     "Caixa": VERDE_CLARO, "—": CINZA},
+                                 title="Depósitos por conta (R$)", **PX)
+                    fig.update_layout(height=480, yaxis_title=None,
+                                      legend_title_text="Tipo")
+                    st.plotly_chart(estilo(fig), width="stretch")
+
+                    st.dataframe(fmt_df(por_conta.rename(columns={
+                        "CONTA": "Conta", "TIPO_CONTA": "Tipo",
+                        "VL_DEPOSITADO": "Depositado R$"}),
+                        brl_cols=["Depositado R$"]), width="stretch", hide_index=True)
+                    st.caption(
+                        "A conta é identificada pela forma de pagamento de cada baixa. "
+                        "**Sem conta** = recebido por adiantamento/crédito/compensação "
+                        "(sem conta bancária ou caixa registrada).")
+            st.divider()
 
             # conciliacao por contrato
             st.markdown("#### 📋 Conciliação por contrato")

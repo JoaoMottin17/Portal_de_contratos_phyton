@@ -84,3 +84,51 @@ FROM (
     WHERE c.ST_TIPO_ES = 'S' AND mv.ID_NOTA_ITEM IS NOT NULL
 )
 """
+
+# ----------------------------------------------------------------------
+# CONTAS DE DEPOSITO (em quais contas/caixas o dinheiro do contrato entrou)
+# ----------------------------------------------------------------------
+# Cada parcela recebida tem BAIXAS (CONTAS_PAG_REC_BAIXA.VALOR_PAGO, que soma
+# exatamente o VL_REC_PAG). A conta do deposito esta na FORMA do pagamento
+# (PAGAMENTOS_FORMAS.CD_LOCAL_PAGAMENTO -> LOCAL_PAGAMENTO.DESCRICAO). Pegamos
+# UMA forma representativa por pagamento (a de maior valor) para nao multiplicar
+# quando o pagamento tem mais de uma forma. BAIXA_ID permite deduplicar no painel.
+SQL_FIN_CONTAS = """
+SELECT p.CONTRATO_ID AS CONTRATO_ID,
+       b.NR_SEQ_GEN AS BAIXA_ID,
+       lp.DESCRICAO AS CONTA,
+       lp.ST_CAIXA_BANCO AS ST_CAIXA_BANCO,
+       b.VALOR_PAGO AS VL_DEPOSITADO,
+       pg.DT_PAGAMENTO AS DATA_PAG
+FROM (
+    SELECT DISTINCT c.ID AS CONTRATO_ID, prp.NR_SEQ_GEN AS NR_SEQ_GEN
+    FROM CONTRATOS c
+    JOIN CONTRATOS_PARCELAS cp
+        ON cp.CD_USUARIO = c.CD_USUARIO AND cp.NR_SEQUENCIAL = c.NR_SEQUENCIAL
+    JOIN V_CTR_PARCELA_NF_PARCELA v ON v.ID_CONTRATO_PARCELA = cp.NR_SEQ_ITEM
+    JOIN CONTAS_PAG_REC_PARC prp ON prp.NR_SEQ_GEN = v.ID_CPRP
+    WHERE c.ST_TIPO_ES = 'S' AND prp.OPERACAO_CONTA = 'R'
+    UNION
+    SELECT DISTINCT c.ID, prp.NR_SEQ_GEN
+    FROM CONTRATOS c
+    JOIN CONTRATOS_ITENS ci
+        ON ci.CD_USUARIO = c.CD_USUARIO AND ci.NR_SEQUENCIAL = c.NR_SEQUENCIAL
+    JOIN CONTRATOS_ITENS_MOVTO mv ON mv.ID_CONTRATO_ITEM = ci.NR_SEQ_ITEM
+    JOIN NOTAS_ITENS nit ON nit.ID = mv.ID_NOTA_ITEM
+    JOIN NOTAS n ON n.ID = nit.ID_NOTA
+    JOIN CONTAS_PAG_REC pr ON pr.ID_NOTA = n.ID AND pr.OPERACAO_CONTA = 'R'
+    JOIN CONTAS_PAG_REC_PARC prp ON prp.CD_PAG_REC = pr.CD_PAG_REC
+    WHERE c.ST_TIPO_ES = 'S' AND mv.ID_NOTA_ITEM IS NOT NULL
+) p
+JOIN CONTAS_PAG_REC_BAIXA b ON b.CD_CONTAS_PAG_REC_PARC = p.NR_SEQ_GEN
+LEFT JOIN PAGAMENTOS pg ON pg.CD_PAGAMENTO = b.CD_PAGAMENTO
+LEFT JOIN (
+    SELECT pf.CD_PAGAMENTO AS CD_PAGAMENTO, pf.CD_LOCAL_PAGAMENTO AS CD_LOCAL_PAGAMENTO
+    FROM PAGAMENTOS_FORMAS pf
+    WHERE pf.NR_SEQ_FORMA = (
+        SELECT FIRST 1 pf2.NR_SEQ_FORMA FROM PAGAMENTOS_FORMAS pf2
+        WHERE pf2.CD_PAGAMENTO = pf.CD_PAGAMENTO
+        ORDER BY pf2.VL_PAGO_LIQ DESC, pf2.NR_SEQ_FORMA)
+) fp ON fp.CD_PAGAMENTO = b.CD_PAGAMENTO
+LEFT JOIN LOCAL_PAGAMENTO lp ON lp.CD_LOC_PAGAMENTO = fp.CD_LOCAL_PAGAMENTO
+"""
